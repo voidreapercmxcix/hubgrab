@@ -87,49 +87,30 @@ chrome.downloads.onChanged.addListener((downloadDelta) => {
 
 // Listen for download events to suppress save dialogs
 chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
-  // HubGrab downloads already have the correct filename set — don't touch them.
+  // HubGrab downloads: use our stored path, overriding whatever S3 Content-Disposition sends
   if (hubgrabDownloadIds.has(downloadItem.id)) {
     hubgrabDownloadIds.delete(downloadItem.id);
-    suggest({ filename: downloadItem.filename, conflictAction: "uniquify" });
+    // Look up the desired path we stored before starting the download
+    const storedPath = downloadFilenames.get(downloadItem.url);
+    if (storedPath) {
+      downloadFilenames.delete(downloadItem.url);
+      suggest({ filename: storedPath, conflictAction: "uniquify" });
+    } else {
+      // Fallback — use whatever downloadPath was in the filename field
+      suggest({ filename: downloadItem.filename, conflictAction: "uniquify" });
+    }
     return;
   }
 
-  // Check if we have a stored filename for this download URL
-  const storedFilename = downloadFilenames.get(downloadItem.url);
-
-  if (storedFilename) {
-    // Use the filename we stored
-    suggest({
-      filename: storedFilename,
-      conflictAction: "uniquify",
-    });
-    // Clean up after use (with a delay to handle retries)
-    setTimeout(() => {
-      downloadFilenames.delete(downloadItem.url);
-    }, 1000);
-  } else {
-    // For other downloads, use the filename from downloadItem if available
-    let filename =
-      downloadItem.filename || downloadItem.suggestedFilename || "";
-
-    // If filename is empty, try to extract from URL
-    if (!filename && downloadItem.url) {
-      const urlParts = downloadItem.url.split("/");
-      filename = urlParts[urlParts.length - 1].split("?")[0];
-    }
-
-    // Remove any folder path, keep only the filename —
-    // BUT leave HubGrab downloads alone as they use intentional subfolders.
-    if (filename && !filename.startsWith("hubgrab/")) {
-      const pathParts = filename.split(/[\/\\]/);
-      filename = pathParts[pathParts.length - 1];
-    }
-
-    suggest({
-      filename: filename || "download",
-      conflictAction: "uniquify",
-    });
+  // Non-HubGrab downloads — strip any path, just keep filename
+  let filename = downloadItem.filename || downloadItem.suggestedFilename || "";
+  if (!filename && downloadItem.url) {
+    const urlParts = downloadItem.url.split("/");
+    filename = urlParts[urlParts.length - 1].split("?")[0];
   }
+  const pathParts = filename.split(/[\/\\]/);
+  filename = pathParts[pathParts.length - 1];
+  suggest({ filename: filename || "download", conflictAction: "uniquify" });
 });
 
 // Listen for messages from content script or popup
@@ -1670,33 +1651,23 @@ async function downloadHFFile(file) {
   const safeFile = (filePath || name).replace(/[^a-zA-Z0-9._\-/]/g, "_");
   const downloadPath = `hubgrab/${safeFolder}/${safeFile}`;
 
-  // Ask the content script to fetch the resolve URL directly — it has the right
-  // HF session cookies and origin context to follow the 302 → S3 redirect cleanly.
-  // This avoids the S3 signed URL being tied to background SW's request context.
-  const tabs = await new Promise((res) =>
-    chrome.tabs.query({ active: true, currentWindow: true }, res)
-  );
-  const tab = tabs.find(t => t.url && t.url.includes("huggingface.co"));
-  if (!tab) throw new Error("No active HuggingFace tab found — keep the HF page open while downloading");
-
-  const blobResp = await new Promise((resolve, reject) => {
-    chrome.tabs.sendMessage(
-      tab.id,
-      { action: "hubgrab_fetch_blob", url: resolveUrl },
-      (response) => {
-        if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
-        if (!response || !response.success) return reject(new Error(response?.error || "blob fetch failed"));
-        resolve(response);
-      }
-    );
+  // Follow the HF resolve URL → S3 signed URL redirect
+  const resp = await fetch(resolveUrl, {
+    method: "GET",
+    redirect: "follow",
+    credentials: "include",
   });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status} for ${name}`);
+  const finalUrl = resp.url;
 
-  const blobUrl = blobResp.blobUrl;
+  // Store the desired path BEFORE calling chrome.downloads.download
+  // so onDeterminingFilename can use it to override whatever S3 sends
+  downloadFilenames.set(finalUrl, downloadPath);
 
   return new Promise((resolve, reject) => {
     chrome.downloads.download(
       {
-        url: blobUrl,
+        url: finalUrl,
         filename: downloadPath,
         saveAs: false,
         conflictAction: "uniquify",
