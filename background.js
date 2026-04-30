@@ -90,13 +90,13 @@ chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
   // HubGrab downloads: use our stored path, overriding whatever S3 Content-Disposition sends
   if (hubgrabDownloadIds.has(downloadItem.id)) {
     hubgrabDownloadIds.delete(downloadItem.id);
-    // Look up the desired path we stored before starting the download
-    const storedPath = downloadFilenames.get(downloadItem.url);
+    // Try both the original resolve URL and the final redirected URL
+    const storedPath = downloadFilenames.get(downloadItem.url) || downloadFilenames.get(downloadItem.finalUrl);
     if (storedPath) {
       downloadFilenames.delete(downloadItem.url);
+      downloadFilenames.delete(downloadItem.finalUrl);
       suggest({ filename: storedPath, conflictAction: "uniquify" });
     } else {
-      // Fallback — use whatever downloadPath was in the filename field
       suggest({ filename: downloadItem.filename, conflictAction: "uniquify" });
     }
     return;
@@ -1651,23 +1651,15 @@ async function downloadHFFile(file) {
   const safeFile = (filePath || name).replace(/[^a-zA-Z0-9._\-/]/g, "_");
   const downloadPath = `hubgrab/${safeFolder}/${safeFile}`;
 
-  // Follow the HF resolve URL → S3 signed URL redirect
-  const resp = await fetch(resolveUrl, {
-    method: "GET",
-    redirect: "follow",
-    credentials: "include",
-  });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status} for ${name}`);
-  const finalUrl = resp.url;
-
-  // Store the desired path BEFORE calling chrome.downloads.download
-  // so onDeterminingFilename can use it to override whatever S3 sends
-  downloadFilenames.set(finalUrl, downloadPath);
+  // Pass resolveUrl directly to chrome.downloads — Chrome's download manager
+  // has access to HF session cookies and will follow the 302 → S3 redirect itself.
+  // Store desired path keyed by resolveUrl so onDeterminingFilename can use it.
+  downloadFilenames.set(resolveUrl, downloadPath);
 
   return new Promise((resolve, reject) => {
     chrome.downloads.download(
       {
-        url: finalUrl,
+        url: resolveUrl,
         filename: downloadPath,
         saveAs: false,
         conflictAction: "uniquify",
