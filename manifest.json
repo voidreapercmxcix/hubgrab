@@ -1,0 +1,58 @@
+{
+  "manifest_version": 3,
+  "name": "HubGrab",
+  "version": "0.1.0",
+  "default_locale": "en",
+  "description": "Bulk downloader for HuggingFace datasets, Suno tracks, and more.",
+  "action": {
+    "default_icon": { "128": "icon128.png" },
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "css": ["content.css"],
+      "js": ["jszip.min.js", "content.js"],
+      "matches": ["https://suno.com/*"],
+      "run_at": "document_idle"
+    },
+    {
+      "js": ["handlers/huggingface.js"],
+      "matches": ["https://huggingface.co/*"],
+      "run_at": "document_idle"
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  },
+  "host_permissions": [
+    "https://suno.com/*",
+    "https://*.suno.com/*",
+    "https://*.suno.ai/*",
+    "https://clerk.suno.com/*",
+    "https://auth.suno.com/*",
+    "https://studio-api.prod.suno.com/*",
+    "https://studio-api-prod.suno.com/*",
+    "https://cdn1.suno.ai/*",
+    "https://cdn2.suno.ai/*",
+    "https://huggingface.co/*",
+    "https://*.huggingface.co/*",
+    "https://*.amazonaws.com/*"
+  ],
+  "permissions": [
+    "storage",
+    "downloads",
+    "tabs",
+    "webRequest",
+    "unlimitedStorage"
+  ],
+  "icons": { "128": "icon128.png" },
+  "web_accessible_resources": [
+    {
+      "matches": ["https://suno.com/*", "https://huggingface.co/*"],
+      "resources": ["icon128.png"]
+    }
+  ]
+}
