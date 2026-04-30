@@ -1670,20 +1670,9 @@ async function downloadHFFile(file) {
   const safeFile = (filePath || name).replace(/[^a-zA-Z0-9._\-/]/g, "_");
   const downloadPath = `hubgrab/${safeFolder}/${safeFile}`;
 
-  // Fetch the resolve URL — HF will 302 → S3 signed URL.
-  // We follow the redirect to get the final S3 URL, then ask the content script
-  // to fetch it as a blob and return a blob: URL. This bypasses the S3
-  // Content-Disposition header that would override our desired filename/folder.
-  const resp = await fetch(resolveUrl, {
-    method: "GET",
-    redirect: "follow",
-    credentials: "include",
-  });
-
-  if (!resp.ok) throw new Error(`HTTP ${resp.status} for ${name}`);
-  const finalUrl = resp.url;
-
-  // Ask the active HuggingFace content script tab to create the blob URL
+  // Ask the content script to fetch the resolve URL directly — it has the right
+  // HF session cookies and origin context to follow the 302 → S3 redirect cleanly.
+  // This avoids the S3 signed URL being tied to background SW's request context.
   const tabs = await new Promise((res) =>
     chrome.tabs.query({ active: true, currentWindow: true }, res)
   );
@@ -1693,7 +1682,7 @@ async function downloadHFFile(file) {
   const blobResp = await new Promise((resolve, reject) => {
     chrome.tabs.sendMessage(
       tab.id,
-      { action: "hubgrab_fetch_blob", url: finalUrl },
+      { action: "hubgrab_fetch_blob", url: resolveUrl },
       (response) => {
         if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
         if (!response || !response.success) return reject(new Error(response?.error || "blob fetch failed"));
