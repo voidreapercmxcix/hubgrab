@@ -470,7 +470,8 @@
   }
 
   // Allow popup "Open HubGrab Panel" button to force a re-scan and show panel
-  chrome.runtime.onMessage.addListener((request) => {
+  // Also handles blob URL creation for folder-safe downloads (background SW can't use createObjectURL)
+  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "hubgrab_show_panel") {
       const files = scrapeFileLinks();
       if (files.length) {
@@ -478,6 +479,29 @@
       } else {
         scheduleScan();
       }
+      return;
+    }
+
+    // background.js asks us to fetch a URL and return a blob URL it can download
+    // This sidesteps the S3 Content-Disposition header overriding our filename
+    if (request.action === "hubgrab_fetch_blob") {
+      (async () => {
+        try {
+          const resp = await fetch(request.url, {
+            method: "GET",
+            credentials: "include",
+          });
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const blob = await resp.blob();
+          const blobUrl = URL.createObjectURL(blob);
+          // Revoke after 2 minutes — enough for chrome.downloads to grab it
+          setTimeout(() => URL.revokeObjectURL(blobUrl), 120000);
+          sendResponse({ success: true, blobUrl });
+        } catch (err) {
+          sendResponse({ success: false, error: err.message });
+        }
+      })();
+      return true; // keep channel open for async response
     }
   });
 

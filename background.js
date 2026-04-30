@@ -1665,30 +1665,49 @@ async function runBatch(files) {
 async function downloadHFFile(file) {
   const { name, resolveUrl, filePath, folderName } = file;
 
-  // Fetch the resolve URL — HF will 302 → S3 signed URL
-  // We need the final URL for chrome.downloads (can't pass a Response object)
-  const resp = await fetch(resolveUrl, {
-    method: "GET",
-    redirect: "follow",
-    credentials: "include", // send HF session cookies
-  });
-
-  if (!resp.ok) {
-    throw new Error(`HTTP ${resp.status} for ${name}`);
-  }
-
-  // resp.url is the final URL after all redirects (the signed S3 URL)
-  const finalUrl = resp.url;
-
   // Build download path: hubgrab/{folderName}/{filePath}
   const safeFolder = (folderName || "download").replace(/[^a-zA-Z0-9._\- ]/g, "_");
   const safeFile = (filePath || name).replace(/[^a-zA-Z0-9._\-/]/g, "_");
   const downloadPath = `hubgrab/${safeFolder}/${safeFile}`;
 
+  // Fetch the resolve URL — HF will 302 → S3 signed URL.
+  // We follow the redirect to get the final S3 URL, then ask the content script
+  // to fetch it as a blob and return a blob: URL. This bypasses the S3
+  // Content-Disposition header that would override our desired filename/folder.
+  const resp = await fetch(resolveUrl, {
+    method: "GET",
+    redirect: "follow",
+    credentials: "include",
+  });
+
+  if (!resp.ok) throw new Error(`HTTP ${resp.status} for ${name}`);
+  const finalUrl = resp.url;
+
+  // Ask the active HuggingFace content script tab to create the blob URL
+  const tabs = await new Promise((res) =>
+    chrome.tabs.query({ active: true, currentWindow: true }, res)
+  );
+  const tab = tabs.find(t => t.url && t.url.includes("huggingface.co"));
+  if (!tab) throw new Error("No active HuggingFace tab found — keep the HF page open while downloading");
+
+  const blobResp = await new Promise((resolve, reject) => {
+    chrome.tabs.sendMessage(
+      tab.id,
+      { action: "hubgrab_fetch_blob", url: finalUrl },
+      (response) => {
+        if (chrome.runtime.lastError) return reject(new Error(chrome.runtime.lastError.message));
+        if (!response || !response.success) return reject(new Error(response?.error || "blob fetch failed"));
+        resolve(response);
+      }
+    );
+  });
+
+  const blobUrl = blobResp.blobUrl;
+
   return new Promise((resolve, reject) => {
     chrome.downloads.download(
       {
-        url: finalUrl,
+        url: blobUrl,
         filename: downloadPath,
         saveAs: false,
         conflictAction: "uniquify",
@@ -1697,7 +1716,7 @@ async function downloadHFFile(file) {
         if (chrome.runtime.lastError) {
           reject(new Error(chrome.runtime.lastError.message));
         } else {
-          hubgrabDownloadIds.add(downloadId); // protect from filename listener
+          hubgrabDownloadIds.add(downloadId);
           console.log(`[HubGrab/HF] Started download ${downloadId}: ${name} → ${downloadPath}`);
           resolve(downloadId);
         }
