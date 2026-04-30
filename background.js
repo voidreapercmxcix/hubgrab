@@ -1116,8 +1116,10 @@ async function downloadFromUrl(
 
 // Download file using Chrome downloads API (legacy function, now uses metadata version)
 async function downloadFile(url, filename, clipId = null, format = "mp3") {
-  // Use the new metadata-enabled download function
-  return downloadFileWithMetadata(url, filename, clipId, format);
+  // Prepend hubgrab/suno/ so tracks land in their own folder
+  const safeFilename = (filename || "track").replace(/[\/\\]/g, "_");
+  const sunoPath = `hubgrab/suno/${safeFilename}`;
+  return downloadFileWithMetadata(url, sunoPath, clipId, format);
 }
 
 // Initiate WAV conversion
