@@ -1,5 +1,8 @@
 # 🔥 HubGrab
 
+<img width="1854" height="1040" alt="Hubgrab" src="https://github.com/user-attachments/assets/17664f8f-a488-4851-984a-338de05d2b65" />
+
+
 A Chrome extension for bulk downloading files from HuggingFace — because clicking 50 individual download buttons is nobody's idea of a good time.
 
 ## What it does
@@ -7,6 +10,7 @@ A Chrome extension for bulk downloading files from HuggingFace — because click
 Adds a floating panel to any HuggingFace repository or dataset page listing all downloadable files with checkboxes, sizes, and a one-click bulk download button.
 
 - ✅ Auto-detects HuggingFace model and dataset pages
+- ✅ Auto-Page-folder namer makes a folder in /Home/Downloads/Hubgrab/<folder-name>
 - ✅ Lists all files with sizes
 - ✅ Junk files (`.gitattributes`, `.gitignore` etc.) unchecked by default — README kept
 - ✅ Folder name auto-filled from repo URL, editable before download
@@ -33,7 +37,10 @@ Not yet on the Chrome Web Store. Load it manually:
 4. Optionally edit the folder name or set a max file size filter
 5. Click **⬇ Download Selected**
 
-> **Note:** Files download to your Chrome download folder. Change it at `chrome://settings/downloads` if needed.
+> **Note:** files donload to Home/Downloads/Hubgrab/Name of page downloaded from
+> 
+<img width="1232" height="1155" alt="hubgrab2" src="https://github.com/user-attachments/assets/ecd73f10-467c-4f75-8550-54c83a797609" />
+
 
 ## Supported sites
 
